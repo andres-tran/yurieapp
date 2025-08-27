@@ -1,7 +1,6 @@
 # app.py
 import os
 import base64
-from io import BytesIO
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -88,11 +87,10 @@ with tab_chat:
 
             try:
                 # Stream tokens from the Responses API
-                # (Streaming events like response.output_text.delta are documented by OpenAI.)
                 with client.responses.stream(
                     model=model,
                     instructions=sys_prompt,
-                    input=prompt,  # only the new user turn; context comes via previous_response_id
+                    input=prompt,  # only the new user turn; context via previous_response_id
                     tools=tools,   # optional web search tool
                     previous_response_id=st.session_state.get("previous_response_id"),
                 ) as stream:
@@ -127,20 +125,11 @@ with tab_chat:
 # Image tab
 # -------------------------------
 with tab_image:
-    st.write("Generate images with streamed partial previews.")
+    st.write("Generate images with streamed partial previews (always using 3 partials).")
     image_prompt = st.text_area(
         "Image prompt",
         "Draw a gorgeous image of a river made of white owl feathers, snaking its way through a serene winter landscape",
         height=100,
-    )
-    # Docs specify partial_images supports 1–3; we let 0 mean “don’t request partials”.
-    n_partials = st.number_input(
-        "Partial images to stream (0–3)",
-        min_value=0,
-        max_value=3,
-        value=2,
-        step=1,
-        help="Set 0 to disable partial previews. 1–3 per API docs.",
     )
     img_model = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
 
@@ -150,18 +139,14 @@ with tab_image:
         spot = st.empty()
 
         try:
-            # Build parameters conditionally so 0 means “omit param”
-            gen_args = dict(
+            # Always request 3 partial previews per docs.
+            stream = client.images.generate(
                 prompt=image_prompt,
                 model=img_model,
                 stream=True,
-                n=1,  # explicit clarity
+                n=1,
+                partial_images=3,
             )
-            if int(n_partials) > 0:
-                gen_args["partial_images"] = int(n_partials)
-
-            # Stream partial images as they are generated; show them live
-            stream = client.images.generate(**gen_args)
 
             for event in stream:
                 etype = getattr(event, "type", "")
@@ -172,8 +157,9 @@ with tab_image:
                     img_bytes = base64.b64decode(img_b64)
                     gallery.append(img_bytes)
                     spot.image(
-                        img_bytes, caption=f"Partial preview #{len(gallery)}",
-                        use_container_width=True
+                        img_bytes,
+                        caption=f"Partial preview #{len(gallery)}",
+                        use_container_width=True,
                     )
 
                 # Final image event (Images API terminal event)
@@ -183,18 +169,19 @@ with tab_image:
                     spot.image(final_bytes, caption="Final image", use_container_width=True)
 
                 # Be tolerant of older/alternate SDK event names (rare)
-                elif etype in ("image_generation.image", "image.image", "image.completed"):
-                    img_b64 = event.b64_json
-                    final_bytes = base64.b64decode(img_b64)
-                    spot.image(final_bytes, caption="Final image", use_container_width=True)
+                elif etype in ("image_generation.image", "image.image", "image.completed",
+                               "response.image_generation_call.completed"):
+                    img_b64 = getattr(event, "b64_json", None)
+                    if img_b64:
+                        final_bytes = base64.b64decode(img_b64)
+                        spot.image(final_bytes, caption="Final image", use_container_width=True)
 
                 # Error surfaced by the stream
                 elif etype.endswith(".error") or etype == "error":
-                    # Many SDKs provide a structured error; fall back to generic.
                     msg = getattr(event, "error", None)
                     st.error(f"Image generation error: {msg or repr(event)}")
 
-                # Ignore other event types quietly (or log them if you wish)
+                # Ignore other event types quietly
                 else:
                     pass
 
@@ -211,7 +198,7 @@ with tab_image:
                     mime="image/png",
                 )
             else:
-                st.info("No image bytes received. Try again or reduce partial previews.")
+                st.info("No image bytes received. Try again.")
 
         except Exception as e:
             st.error(f"Image generation error: {e}")
