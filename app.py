@@ -146,22 +146,18 @@ with tab_image:
             for event in stream:
                 etype = getattr(event, "type", "")
 
-                # Partial frames during generation
+                # Partial frames during generation (no captions)
                 if etype == "image_generation.partial_image":
                     img_b64 = event.b64_json
                     img_bytes = base64.b64decode(img_b64)
                     gallery.append(img_bytes)
-                    spot.image(
-                        img_bytes,
-                        caption=f"Partial preview #{len(gallery)}",
-                        use_container_width=True,
-                    )
+                    spot.image(img_bytes, use_container_width=True)
 
-                # Final image event (Images API terminal event)
+                # Final image event (Images API terminal event; no caption)
                 elif etype == "image_generation.completed":
                     img_b64 = event.b64_json
                     final_bytes = base64.b64decode(img_b64)
-                    spot.image(final_bytes, use_container_width=True)  # no caption
+                    spot.image(final_bytes, use_container_width=True)
 
                 # Be tolerant of older/alternate SDK event names (rare)
                 elif etype in (
@@ -173,7 +169,7 @@ with tab_image:
                     img_b64 = getattr(event, "b64_json", None)
                     if img_b64:
                         final_bytes = base64.b64decode(img_b64)
-                        spot.image(final_bytes, use_container_width=True)  # no caption
+                        spot.image(final_bytes, use_container_width=True)
 
                 # Error surfaced by the stream
                 elif etype.endswith(".error") or etype == "error":
