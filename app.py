@@ -133,40 +133,72 @@ with tab_image:
         "Draw a gorgeous image of a river made of white owl feathers, snaking its way through a serene winter landscape",
         height=100,
     )
+    # Docs specify partial_images supports 1–3; we let 0 mean “don’t request partials”.
     n_partials = st.number_input(
-        "Partial images to stream", min_value=0, max_value=4, value=2, step=1
+        "Partial images to stream (0–3)",
+        min_value=0,
+        max_value=3,
+        value=2,
+        step=1,
+        help="Set 0 to disable partial previews. 1–3 per API docs.",
     )
     img_model = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
 
     if st.button("Generate image"):
-        gallery = []
-        final_bytes = None
+        gallery: list[bytes] = []
+        final_bytes: bytes | None = None
         spot = st.empty()
 
         try:
-            # Stream partial images as they are generated; show them live
-            stream = client.images.generate(
+            # Build parameters conditionally so 0 means “omit param”
+            gen_args = dict(
                 prompt=image_prompt,
                 model=img_model,
                 stream=True,
-                partial_images=int(n_partials),
+                n=1,  # explicit clarity
             )
+            if int(n_partials) > 0:
+                gen_args["partial_images"] = int(n_partials)
+
+            # Stream partial images as they are generated; show them live
+            stream = client.images.generate(**gen_args)
 
             for event in stream:
-                # Partial frames during generation (documented by OpenAI as 'partial_image')
-                if getattr(event, "type", "") == "image_generation.partial_image":
+                etype = getattr(event, "type", "")
+
+                # Partial frames during generation
+                if etype == "image_generation.partial_image":
                     img_b64 = event.b64_json
                     img_bytes = base64.b64decode(img_b64)
                     gallery.append(img_bytes)
-                    spot.image(img_bytes, caption="Partial preview", use_container_width=True)
+                    spot.image(
+                        img_bytes, caption=f"Partial preview #{len(gallery)}",
+                        use_container_width=True
+                    )
 
-                # Final image event (name may evolve; we handle both gracefully)
-                elif getattr(event, "type", "") in ("image_generation.image", "image.image"):
+                # Final image event (Images API terminal event)
+                elif etype == "image_generation.completed":
                     img_b64 = event.b64_json
                     final_bytes = base64.b64decode(img_b64)
                     spot.image(final_bytes, caption="Final image", use_container_width=True)
 
-            # Fallback: if the final event shape changes, show the last partial
+                # Be tolerant of older/alternate SDK event names (rare)
+                elif etype in ("image_generation.image", "image.image", "image.completed"):
+                    img_b64 = event.b64_json
+                    final_bytes = base64.b64decode(img_b64)
+                    spot.image(final_bytes, caption="Final image", use_container_width=True)
+
+                # Error surfaced by the stream
+                elif etype.endswith(".error") or etype == "error":
+                    # Many SDKs provide a structured error; fall back to generic.
+                    msg = getattr(event, "error", None)
+                    st.error(f"Image generation error: {msg or repr(event)}")
+
+                # Ignore other event types quietly (or log them if you wish)
+                else:
+                    pass
+
+            # Fallback: if we never saw a final event, show the last partial
             if final_bytes is None and gallery:
                 final_bytes = gallery[-1]
                 spot.image(final_bytes, caption="Final (from last partial)", use_container_width=True)
@@ -178,6 +210,8 @@ with tab_image:
                     file_name="generated.png",
                     mime="image/png",
                 )
+            else:
+                st.info("No image bytes received. Try again or reduce partial previews.")
 
         except Exception as e:
             st.error(f"Image generation error: {e}")
