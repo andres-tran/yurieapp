@@ -117,15 +117,10 @@ with tab_chat:
                 # Save response id to keep conversation state across turns
                 st.session_state["previous_response_id"] = getattr(final, "id", None)
 
-    st.caption(
-        "Tip: Toggle **Use web search** in the sidebar to ground answers with live web results."
-    )
-
 # -------------------------------
 # Image tab
 # -------------------------------
 with tab_image:
-    st.write("Generate images with streamed partial previews (always using 3 partials).")
     image_prompt = st.text_area(
         "Image prompt",
         "Draw a gorgeous image of a river made of white owl feathers, snaking its way through a serene winter landscape",
@@ -166,15 +161,19 @@ with tab_image:
                 elif etype == "image_generation.completed":
                     img_b64 = event.b64_json
                     final_bytes = base64.b64decode(img_b64)
-                    spot.image(final_bytes, caption="Final image", use_container_width=True)
+                    spot.image(final_bytes, use_container_width=True)  # no caption
 
                 # Be tolerant of older/alternate SDK event names (rare)
-                elif etype in ("image_generation.image", "image.image", "image.completed",
-                               "response.image_generation_call.completed"):
+                elif etype in (
+                    "image_generation.image",
+                    "image.image",
+                    "image.completed",
+                    "response.image_generation_call.completed",
+                ):
                     img_b64 = getattr(event, "b64_json", None)
                     if img_b64:
                         final_bytes = base64.b64decode(img_b64)
-                        spot.image(final_bytes, caption="Final image", use_container_width=True)
+                        spot.image(final_bytes, use_container_width=True)  # no caption
 
                 # Error surfaced by the stream
                 elif etype.endswith(".error") or etype == "error":
@@ -185,10 +184,10 @@ with tab_image:
                 else:
                     pass
 
-            # Fallback: if we never saw a final event, show the last partial
+            # Fallback: if we never saw a final event, show the last partial (no caption)
             if final_bytes is None and gallery:
                 final_bytes = gallery[-1]
-                spot.image(final_bytes, caption="Final (from last partial)", use_container_width=True)
+                spot.image(final_bytes, use_container_width=True)
 
             if final_bytes:
                 st.download_button(
